@@ -21,11 +21,10 @@ class HolisticCloudlet:
         self.pending_weights = None
         self.device_agents = []
 
-        # Statistics
+        # Statistics (accumulated until Ctrl+C)
         self.episode_stats = {}           # device_id -> [sum_energy, sum_misses, count]
         self.lock_stats = threading.Lock()
         self.total_episodes_processed = 0
-        self.print_every_n_episodes = 100   # print every 100 episodes globally
 
     # --- Reporting from devices ---
     def send_energy_report(self, device_id, energy, timestamp=None):
@@ -33,7 +32,6 @@ class HolisticCloudlet:
             timestamp = time.time()
         with self.lock:
             self.energy_reports.append((timestamp, device_id, energy))
-            # keep last 2 seconds
             now = time.time()
             self.energy_reports = [(ts, d, e) for ts, d, e in self.energy_reports if ts > now - 2.0]
 
@@ -46,7 +44,6 @@ class HolisticCloudlet:
             self.deadline_reports = [(ts, d, m) for ts, d, m in self.deadline_reports if ts > now - 2.0]
 
     def send_trajectory(self, device_id, trajectory):
-        """trajectory: list of (s_key, a_key, reward, s_next_key)"""
         with self.lock:
             self.replay_buffer.extend(trajectory)
             if len(self.replay_buffer) > 50000:
@@ -62,9 +59,7 @@ class HolisticCloudlet:
             stats[1] += episode_misses
             stats[2] += 1
             self.total_episodes_processed += 1
-            # Print statistics only after every N episodes (globally)
-            if self.total_episodes_processed % self.print_every_n_episodes == 0:
-                self.print_statistics()
+            # No automatic printing – we'll print only at the end
 
     # --- Global reward computation ---
     def compute_global_reward(self):
@@ -86,7 +81,7 @@ class HolisticCloudlet:
         for agent in self.device_agents:
             agent.set_global_reward(r)
 
-    # --- Global critic training (off‑policy) ---
+    # --- Global critic training ---
     def update_global_critic(self, batch_size=32):
         if len(self.replay_buffer) < batch_size:
             return
@@ -112,15 +107,14 @@ class HolisticCloudlet:
         with self.lock:
             return self.global_critic.get_weights()
 
-    # --- Statistics printing ---
+    # --- Final statistics printing (only called at exit) ---
     def print_statistics(self):
         with self.lock_stats:
             if not self.episode_stats:
-                print("[CLOUDLET] No episode stats yet.")
+                print("\n[CLOUDLET] No episodes completed. No statistics to show.")
                 return
-            print("\n========== Holistic MARL Statistics ==========")
-            print(f"(After {self.total_episodes_processed} total episodes across all devices)")
-            print("(Global deadline miss rate = % of episodes exceeding total deadline τ)")
+            print("\n========== Holistic MARL Final Statistics ==========")
+            print(f"Total episodes across all devices: {self.total_episodes_processed}")
             total_energy_all = 0.0
             total_misses_all = 0
             total_episodes_all = 0
@@ -135,10 +129,7 @@ class HolisticCloudlet:
                 avg_energy_overall = total_energy_all / total_episodes_all
                 miss_rate_overall = (total_misses_all / total_episodes_all) * 100
                 print(f"OVERALL: avg energy={avg_energy_overall:.4f} J, global deadline miss rate={miss_rate_overall:.2f}%")
-            print("==============================================\n")
-
-    # Alias for compatibility with runner (not strictly needed, but kept)
-    _print_statistics = print_statistics
+            print("===================================================\n")
 
     # --- Background threads ---
     def set_devices(self, agents):

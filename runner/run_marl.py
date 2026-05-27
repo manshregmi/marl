@@ -14,7 +14,6 @@ def ensure_save_dir():
         os.makedirs(SAVE_DIR)
 
 def load_all_tables(num_devices):
-    """Load policy and value tables for all devices and global critic from fixed filenames."""
     policy_tables = {}
     value_tables = {}
     global_weights = None
@@ -54,7 +53,7 @@ def save_all_tables(agents, cloudlet):
     with open(global_file, 'wb') as f:
         pickle.dump(cloudlet.get_global_critic_weights(), f)
     print(f"  Saved Global Critic")
-    print(f"[SAVE] Done.")
+    print("[SAVE] Done.")
 
 def load_profiling():
     return get_profiling_data(deadline=500, edge_devices=8)
@@ -77,7 +76,6 @@ def main():
     profiling = load_profiling()
     num_devices = 8
 
-    # Try to load existing tables for resuming training
     print("[MAIN] Checking for existing saved tables...")
     policy_tables, value_tables, global_weights = load_all_tables(num_devices)
     if any(v is not None for v in policy_tables.values()):
@@ -120,19 +118,24 @@ def main():
     t_critic.start()
 
     print("[MAIN] All threads started. Training will run until Ctrl+C.")
-    print("[MAIN] Statistics will be printed every 100 total episodes (across all devices).")
+    print("[MAIN] (No intermediate statistics; final summary will be printed after stopping.)")
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n[MAIN] Interrupt received. Saving tables before exit...")
+        print("\n[MAIN] Interrupt received. Saving tables and printing final statistics...")
         stop_event.set()
-        time.sleep(1)  # give threads a moment to finish current step
+        time.sleep(1)  # allow threads to finish current step
+
+        # Save all tables
         save_all_tables(agents, cloudlet)
+
+        # Join threads
         for t in device_threads:
             t.join()
         t_reward.join()
         t_critic.join()
+
         # Print final statistics
         cloudlet.print_statistics()
         print("[MAIN] Done.")
